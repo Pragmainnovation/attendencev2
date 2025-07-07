@@ -1,0 +1,9 @@
+streamlit
+opencv-python-headless
+geopy
+pandas
+numpy
+torch
+facenet-pytorch
+Pillow
+streamlit-js-eval
