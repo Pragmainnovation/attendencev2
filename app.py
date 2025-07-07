@@ -539,6 +539,8 @@ def attendance_page():
                 if last_checkin:
                     last_checkin_dt = pd.to_datetime(f'{last_checkin[0]} {last_checkin[1]}', errors='coerce')
                     if pd.notnull(last_checkin_dt):
+                        if last_checkin_dt.tzinfo is None:
+                            last_checkin_dt = egypt_tz.localize(last_checkin_dt)
                         hour_value = round((now - last_checkin_dt).total_seconds() / 3600, 2)
                         if hour_value < 1 or hour_value < 0:
                             hour_value = 0
