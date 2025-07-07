@@ -413,6 +413,22 @@ def admin_dashboard():
     else:
         st.info("No logs found.")
 
+    # Delete attendance by date range
+    st.subheader("Delete Attendance Records by Date Range")
+    start_date = st.date_input("Start Date")
+    end_date = st.date_input("End Date")
+    if st.button("Delete Attendance in Range"):
+        if start_date > end_date:
+            st.error("Start date must be before or equal to end date.")
+        else:
+            conn = get_data_db_connection()
+            c = conn.cursor()
+            c.execute("DELETE FROM attendance WHERE date >= ? AND date <= ?", (str(start_date), str(end_date)))
+            conn.commit()
+            conn.close()
+            st.success(f"Attendance records from {start_date} to {end_date} deleted.")
+            log_admin_action(f"Deleted attendance records from {start_date} to {end_date}", username=st.session_state.get('admin_username'))
+
 def attendance_page():
     st.header('Employee Attendance')
     st.warning(
@@ -530,6 +546,9 @@ def attendance_page():
             else:
                 # Late if after 12:00
                 if now_time > datetime.strptime('12:00', '%H:%M').time():
+                    status = 'late'
+                # Also mark as late if current time is after 12:00pm (redundant for clarity)
+                if now.hour > 12 or (now.hour == 12 and now.minute > 0):
                     status = 'late'
             date_str = now.strftime('%Y-%m-%d')
             time_str = now.strftime('%H:%M:%S')
