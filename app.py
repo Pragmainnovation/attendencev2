@@ -17,6 +17,7 @@ from facenet_pytorch import MTCNN, InceptionResnetV1
 import sqlite3
 import hashlib
 import logging
+import pytz
 
 # Load face models using official pretrained weights (no .pth files needed)
 mtcnn = MTCNN(image_size=160, margin=14, keep_all=False, device='cpu')
@@ -523,7 +524,8 @@ def attendance_page():
         user_loc = (latitude, longitude)
         is_near, dist = check_location(user_loc)
         if is_near:
-            now = datetime.now()
+            egypt_tz = pytz.timezone('Africa/Cairo')
+            now = datetime.now(egypt_tz)
             now_time = now.time()
             hour_value = ""
             status = ""
