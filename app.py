@@ -504,35 +504,33 @@ def attendance_page():
         user_loc = (latitude, longitude)
         is_near, dist = check_location(user_loc)
         if is_near:
-            att_df = load_attendance()
-            now = datetime.now()
-            now_time = now.time()
-            # Find the last record for this employee in the database
+            # Query the database directly for the last record for this employee
+            conn = get_data_db_connection()
+            c = conn.cursor()
+            c.execute('''SELECT type, date, time FROM attendance WHERE name = ? ORDER BY date DESC, time DESC LIMIT 1''', (recognized_name,))
+            row = c.fetchone()
             last_type = None
             last_checkin_dt = None
-            emp_entries = att_df[att_df['name'] == recognized_name]
-            if not emp_entries.empty:
-                # Sort by date and time for correct order
-                emp_entries = emp_entries.copy()
-                emp_entries['dt'] = pd.to_datetime(emp_entries['date'] + ' ' + emp_entries['time'], errors='coerce')
-                emp_entries_sorted = emp_entries.sort_values(by='dt')
-                last_type = emp_entries_sorted.iloc[-1]['type']
-                # Find last check-in datetime for this employee
-                checkin_entries = emp_entries_sorted[emp_entries_sorted['type'] == 'Check In']
-                if not checkin_entries.empty:
-                    last_checkin_dt = checkin_entries.iloc[-1]['dt']
-            # Alternate check type based on last record
+            if row:
+                last_type = row[0]
+                if last_type == 'Check In':
+                    # Get the last check-in datetime
+                    c.execute('''SELECT date, time FROM attendance WHERE name = ? AND type = 'Check In' ORDER BY date DESC, time DESC LIMIT 1''', (recognized_name,))
+                    checkin_row = c.fetchone()
+                    if checkin_row:
+                        last_checkin_dt = pd.to_datetime(checkin_row[0] + ' ' + checkin_row[1], errors='coerce')
+            conn.close()
+            now = datetime.now()
+            now_time = now.time()
             hour_value = ""
             if last_type == 'Check In':
                 check_type = 'Check Out'
                 status = 'early leave' if now_time < datetime.strptime('19:00', '%H:%M').time() else ''
-                # Calculate hours spent since last check-in
                 if last_checkin_dt is not None:
                     hour_value = round((now - last_checkin_dt).total_seconds() / 3600, 2)
             else:
                 check_type = 'Check In'
                 status = 'late' if now_time > datetime.strptime('12:00', '%H:%M').time() else ''
-            # Prepare new row with split date/time
             date_str = now.strftime('%Y-%m-%d')
             time_str = now.strftime('%H:%M:%S')
             new_row = pd.DataFrame([{
@@ -545,7 +543,7 @@ def attendance_page():
                 'status': status,
                 'hour': hour_value
             }])
-            # Remove old 'datetime' column if present and ensure columns
+            att_df = load_attendance()
             if 'datetime' in att_df.columns:
                 att_df = att_df.drop(columns=['datetime'])
             for col in ['date', 'time', 'status', 'hour']:
