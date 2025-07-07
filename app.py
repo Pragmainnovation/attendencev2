@@ -522,6 +522,8 @@ def attendance_page():
                     last_checkin_dt = pd.to_datetime(f'{last_checkin[0]} {last_checkin[1]}', errors='coerce')
                     if pd.notnull(last_checkin_dt):
                         hour_value = round((now - last_checkin_dt).total_seconds() / 3600, 2)
+                        if hour_value < 1 or hour_value < 0:
+                            hour_value = 0
                 # Early leave if before 19:00
                 if now_time < datetime.strptime('19:00', '%H:%M').time():
                     status = 'early leave'
