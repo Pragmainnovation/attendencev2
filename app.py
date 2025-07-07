@@ -496,6 +496,9 @@ def attendance_page():
     if captured_image and recognized_name and recognized_name != "Unknown":
         st.success(f"Recognized: {recognized_name}")
 
+    # Manual dropdown for Check In/Check Out
+    check_type = st.selectbox('Select Attendance Type', ['Check In', 'Check Out'])
+
     # Require both location and face recognition for submit
     location_ready = latitude is not None and longitude is not None
     submit_disabled = not (captured_image and allow_submit and location_ready)
@@ -504,43 +507,28 @@ def attendance_page():
         user_loc = (latitude, longitude)
         is_near, dist = check_location(user_loc)
         if is_near:
-            # Query the database for all records for this employee, fetch unsorted
-            conn = get_data_db_connection()
-            c = conn.cursor()
-            c.execute('''SELECT type, date, time FROM attendance WHERE name = ?''', (recognized_name,))
-            rows = c.fetchall()
-            conn.close()
-            last_type = None
-            last_checkin_dt = None
-            if rows:
-                # Build a list of (type, datetime) and sort
-                records = []
-                for t, d, tm in rows:
-                    try:
-                        dt = pd.to_datetime(f'{d} {tm}', errors='coerce')
-                        if pd.notnull(dt):
-                            records.append((t, dt))
-                    except Exception:
-                        continue
-                if records:
-                    records.sort(key=lambda x: x[1], reverse=True)  # Most recent first
-                    last_type = records[0][0]
-                    if last_type == 'Check In':
-                        for t, dt in records:
-                            if t == 'Check In':
-                                last_checkin_dt = dt
-                                break
             now = datetime.now()
             now_time = now.time()
             hour_value = ""
-            if last_type == 'Check In':
-                check_type = 'Check Out'
-                status = 'early leave' if now_time < datetime.strptime('19:00', '%H:%M').time() else ''
-                if last_checkin_dt is not None:
-                    hour_value = round((now - last_checkin_dt).total_seconds() / 3600, 2)
+            status = ""
+            if check_type == 'Check Out':
+                # Fetch last Check In for this user
+                conn = get_data_db_connection()
+                c = conn.cursor()
+                c.execute('''SELECT date, time FROM attendance WHERE name = ? AND type = ? ORDER BY date DESC, time DESC''', (recognized_name, 'Check In'))
+                last_checkin = c.fetchone()
+                conn.close()
+                if last_checkin:
+                    last_checkin_dt = pd.to_datetime(f'{last_checkin[0]} {last_checkin[1]}', errors='coerce')
+                    if pd.notnull(last_checkin_dt):
+                        hour_value = round((now - last_checkin_dt).total_seconds() / 3600, 2)
+                # Early leave if before 19:00
+                if now_time < datetime.strptime('19:00', '%H:%M').time():
+                    status = 'early leave'
             else:
-                check_type = 'Check In'
-                status = 'late' if now_time > datetime.strptime('12:00', '%H:%M').time() else ''
+                # Late if after 12:00
+                if now_time > datetime.strptime('12:00', '%H:%M').time():
+                    status = 'late'
             date_str = now.strftime('%Y-%m-%d')
             time_str = now.strftime('%H:%M:%S')
             new_row = pd.DataFrame([{
