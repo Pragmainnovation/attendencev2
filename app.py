@@ -507,29 +507,20 @@ def attendance_page():
             att_df = load_attendance()
             now = datetime.now()
             now_time = now.time()
-            # Find the last record for this employee in the entire CSV
+            # Find the last record for this employee in the database
             last_type = None
             last_checkin_dt = None
-            if not att_df.empty:
-                if 'date' in att_df.columns and 'time' in att_df.columns:
-                    emp_entries = att_df[att_df['name'] == recognized_name]
-                    if not emp_entries.empty:
-                        dt_series = pd.to_datetime(emp_entries['date'] + ' ' + emp_entries['time'], errors='coerce')
-                        emp_entries = emp_entries.assign(dt=dt_series)
-                        emp_entries_sorted = emp_entries.sort_values(by='dt')
-                        last_type = emp_entries_sorted.iloc[-1]['type']
-                        # Find last check-in datetime for this employee
-                        checkin_entries = emp_entries_sorted[emp_entries_sorted['type'] == 'Check In']
-                        if not checkin_entries.empty:
-                            last_checkin_dt = checkin_entries.iloc[-1]['dt']
-                elif 'datetime' in att_df.columns:
-                    emp_entries = att_df[att_df['name'] == recognized_name]
-                    if not emp_entries.empty:
-                        emp_entries_sorted = emp_entries.sort_values(by=['datetime'])
-                        last_type = emp_entries_sorted.iloc[-1]['type']
-                        checkin_entries = emp_entries_sorted[emp_entries_sorted['type'] == 'Check In']
-                        if not checkin_entries.empty:
-                            last_checkin_dt = pd.to_datetime(checkin_entries.iloc[-1]['datetime'], errors='coerce')
+            emp_entries = att_df[att_df['name'] == recognized_name]
+            if not emp_entries.empty:
+                # Sort by date and time for correct order
+                emp_entries = emp_entries.copy()
+                emp_entries['dt'] = pd.to_datetime(emp_entries['date'] + ' ' + emp_entries['time'], errors='coerce')
+                emp_entries_sorted = emp_entries.sort_values(by='dt')
+                last_type = emp_entries_sorted.iloc[-1]['type']
+                # Find last check-in datetime for this employee
+                checkin_entries = emp_entries_sorted[emp_entries_sorted['type'] == 'Check In']
+                if not checkin_entries.empty:
+                    last_checkin_dt = checkin_entries.iloc[-1]['dt']
             # Alternate check type based on last record
             hour_value = ""
             if last_type == 'Check In':
