@@ -18,6 +18,8 @@ import sqlite3
 import hashlib
 import logging
 import pytz
+import base64
+import requests
 
 # Load face models using official pretrained weights (no .pth files needed)
 mtcnn = MTCNN(image_size=160, margin=14, keep_all=False, device='cpu')
@@ -151,6 +153,11 @@ def save_employees(df):
         c.execute('INSERT OR REPLACE INTO employees (name, face_encoding) VALUES (?, ?)', (row['name'], row['face_encoding']))
     conn.commit()
     conn.close()
+    # Upload to GitHub
+    try:
+        upload_db_to_github()
+    except Exception as e:
+        print(f'GitHub upload failed: {e}')
 
 def load_attendance():
     conn = get_data_db_connection()
@@ -176,6 +183,11 @@ def save_attendance(df):
             ))
     conn.commit()
     conn.close()
+    # Upload to GitHub
+    try:
+        upload_db_to_github()
+    except Exception as e:
+        print(f'GitHub upload failed: {e}')
 
 def check_location(user_loc):
     dist = geodesic(COMPANY_LOCATION, user_loc).meters
@@ -250,6 +262,79 @@ def get_log_file_contents():
             return f.read()
     return ""
 
+# --- GitHub upload config ---
+GITHUB_TOKEN = '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'  # User's provided token
+GITHUB_REPO = 'Pragmainnovation/attendencev2'  # Corrected repo name
+GITHUB_FILEPATH = 'data.db'  # Path in repo
+GITHUB_BRANCH = 'main'  # Confirmed branch
+
+def upload_db_to_github(local_db_path='data.db',
+                        repo=GITHUB_REPO,
+                        filepath=GITHUB_FILEPATH,
+                        branch=GITHUB_BRANCH,
+                        token=GITHUB_TOKEN):
+    """
+    Uploads the local database file to the specified GitHub repo and path.
+    Overwrites the file if it exists.
+    """
+    api_url = f'https://api.github.com/repos/{repo}/contents/{filepath}'
+    with open(local_db_path, 'rb') as f:
+        content = base64.b64encode(f.read()).decode('utf-8')
+    headers = {
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github.v3+json'
+    }
+    # Get the SHA of the existing file (if any)
+    r = requests.get(api_url + f'?ref={branch}', headers=headers)
+    if r.status_code == 200:
+        sha = r.json()['sha']
+    else:
+        sha = None
+    data = {
+        'message': 'Update data.db from Streamlit app',
+        'content': content,
+        'branch': branch
+    }
+    if sha:
+        data['sha'] = sha
+    r = requests.put(api_url, headers=headers, json=data)
+    if r.status_code in [200, 201]:
+        print('Database uploaded to GitHub.')
+        return True
+    else:
+        print(f'GitHub upload failed: {r.status_code} {r.text}')
+        return False
+
+def download_db_from_github(local_db_path='data.db',
+                          repo=GITHUB_REPO,
+                          filepath=GITHUB_FILEPATH,
+                          branch=GITHUB_BRANCH,
+                          token=GITHUB_TOKEN):
+    """
+    Downloads the latest database file from GitHub and overwrites the local file.
+    """
+    api_url = f'https://api.github.com/repos/{repo}/contents/{filepath}?ref={branch}'
+    headers = {
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github.v3.raw'
+    }
+    r = requests.get(api_url, headers=headers)
+    if r.status_code == 200:
+        # If Accept: raw works, r.content is the file
+        with open(local_db_path, 'wb') as f:
+            f.write(r.content)
+        print('Database downloaded from GitHub.')
+        return True
+    elif r.status_code == 404:
+        print('Database file not found on GitHub. Using local copy.')
+        return False
+    else:
+        print(f'GitHub download failed: {r.status_code} {r.text}')
+        return False
+
+# --- Download DB from GitHub on startup ---
+download_db_from_github()
+
 # Streamlit app
 def main():
     # Rerun workaround: check for rerun flag
@@ -279,6 +364,7 @@ def main():
                 password_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
                 if any(u['username'] == username and u['password'] == password_hash for u in admins):
                     st.session_state.admin_logged_in = True
+                    st.session_state.admin_username = username  # Set admin username in session
                     st.session_state.do_rerun = True
                 else:
                     st.error('Invalid credentials')
@@ -288,8 +374,11 @@ def main():
 def admin_dashboard():
     st.title('Admin Dashboard')
     # Attendance download button (from database)
-    att_df = load_attendance()
-    if st.download_button("Download Attendance CSV", att_df.to_csv(index=False), file_name="attendance.csv", mime="text/csv", key="download_attendance_csv"):
+    if st.button("Download Attendance CSV (Cloud)"):
+        # Always fetch latest DB from GitHub before generating CSV
+        download_db_from_github()
+        att_df = load_attendance()
+        st.download_button("Download Attendance CSV", att_df.to_csv(index=False), file_name="attendance.csv", mime="text/csv", key="download_attendance_csv")
         log_admin_action("Downloaded attendance CSV", username=st.session_state.get('admin_username'))
     # Log file download button
     log_contents = get_log_file_contents()
@@ -377,7 +466,7 @@ def admin_dashboard():
                         employees = pd.concat([employees, new_row], ignore_index=True)
                         save_employees(employees)
                         st.success(f"Employee '{new_name}' added successfully!")
-                        log_admin_action("Added new employee", username=st.session_state.admin_username, details=new_name)
+                        log_admin_action("Added new employee", username=st.session_state.get('admin_username'), details=new_name)
     # Change password section
     st.subheader("Change Admin Password")
     with st.form("change_password_form"):
@@ -415,19 +504,23 @@ def admin_dashboard():
         st.info("No logs found.")
 
     # Delete attendance by date range
-    st.subheader("Delete Attendance Records by Date Range")
+    st.subheader("Delete Attendance Records by Date Range (Cloud)")
     start_date = st.date_input("Start Date")
     end_date = st.date_input("End Date")
-    if st.button("Delete Attendance in Range"):
+    if st.button("Delete Attendance in Range (Cloud)"):
         if start_date > end_date:
             st.error("Start date must be before or equal to end date.")
         else:
+            # Always fetch latest DB from GitHub before deleting
+            download_db_from_github()
             conn = get_data_db_connection()
             c = conn.cursor()
             c.execute("DELETE FROM attendance WHERE date >= ? AND date <= ?", (str(start_date), str(end_date)))
             conn.commit()
             conn.close()
-            st.success(f"Attendance records from {start_date} to {end_date} deleted.")
+            # Upload updated DB to GitHub
+            upload_db_to_github()
+            st.success(f"Attendance records from {start_date} to {end_date} deleted (cloud updated).")
             log_admin_action(f"Deleted attendance records from {start_date} to {end_date}", username=st.session_state.get('admin_username'))
 
 def attendance_page():
